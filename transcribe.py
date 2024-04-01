@@ -1,74 +1,43 @@
 import json
+import shutil
 import logging
 import os
 import subprocess
 import sys
+from datetime import datetime
 from collections import deque
 from pathlib import Path
-from dotenv import load_dotenv
+from flask import Flask, request, jsonify, send_file
+from flask_cors import CORS
 
 from tafrigh import Config, TranscriptType, Writer, farrigh
 from tafrigh.recognizers.wit_recognizer import WitRecognizer
 
-# Load environment variables from .env file
-load_dotenv()
-
-# Define Wit.ai API keys for languages using environment variables
-LANGUAGE_API_KEYS = {
-    'EN': os.getenv('WIT_API_KEY_ENGLISH'),
-    'AR': os.getenv('WIT_API_KEY_ARABIC'),
-    'FR': os.getenv('WIT_API_KEY_FRENCH'),
-    'JA': os.getenv('WIT_API_KEY_JAPANESE'),
-    # Add more languages and API keys as needed
-}
-
-# Check if at least one API key is provided
-if not any(LANGUAGE_API_KEYS.values()):
-    print("Error: At least one Wit.ai API key must be provided in the .env file.")
-    sys.exit(1)
-
-
-# Set up logging
-#logging.basicConfig(filename='transcription.log', level=logging.DEBUG)
+app = Flask(__name__)
+CORS(app)
 
 def download_youtube_audio(youtube_url):
-    output_path = Path(__file__).parent / 'downloads' / '%(id)s.%(ext)s'
+    # Generate a timestamp string for unique folder names
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    # Update the output_path to use the timestamp in the folder name
+    output_path = Path(__file__).parent / 'downloads' / timestamp / '%(id)s.%(ext)s'
     command = ['yt-dlp', '-x', '--audio-format', 'wav', '-o', str(output_path), youtube_url]
     subprocess.run(command, check=True)
-    audio_file = next(Path(__file__).parent.glob('downloads/*.wav'))
-    return audio_file
+    # Find the first .wav file in the newly created timestamp-named directory
+    audio_file = next((Path(__file__).parent / 'downloads' / timestamp).glob('*.wav'), None)
+    return audio_file, timestamp  # Return the timestamp for further use
 
-def convert_video_to_audio(video_path):
-    audio_output_path = video_path.with_suffix('.wav')  # Ensure output is WAV
+def convert_video_to_audio(video_path, timestamp):
+    # Use the same timestamp to store the converted audio
+    audio_output_path = Path(__file__).parent / 'downloads' / timestamp / (video_path.stem + '.wav')
     command = ['ffmpeg', '-i', str(video_path), '-vn', '-acodec', 'pcm_s16le', '-ar', '44100', '-ac', '2', str(audio_output_path)]
     subprocess.run(command, check=True)
     print(f"Video converted to audio: {audio_output_path}")
     return audio_output_path
 
-def convert_mp3_to_wav(mp3_path):
-    wav_output_path = mp3_path.with_suffix('.wav')
-    command = ['ffmpeg', '-i', str(mp3_path), str(wav_output_path)]
-    subprocess.run(command, check=True)
-    print(f"MP3 converted to WAV: {wav_output_path}")
-    return wav_output_path
-
-def is_wav_file(file_path):
-    try:
-        with open(file_path, 'rb') as file:
-            return file.read(4) == b'RIFF'
-    except IOError:
-        return False
-
-def transcribe_file(file_path, language_sign):
-    if not is_wav_file(file_path):
-        print(f"Skipping file {file_path} as it is not in WAV format.")
-        return
-
-    wit_api_key = LANGUAGE_API_KEYS.get(language_sign.upper())
-    if not wit_api_key:
-        print(f"API key not found for language: {language_sign}")
-        return
-
+def transcribe_file(file_path, language_sign, api_key, timestamp):
+    # Transcription should save files in the same timestamp-named directory
+    output_dir = Path(__file__).parent / 'downloads' / timestamp
     config = Config(
         urls_or_paths=[str(file_path)],
         skip_if_output_exist=False,
@@ -80,56 +49,64 @@ def transcribe_file(file_path, language_sign):
         use_faster_whisper=False,
         beam_size=0,
         ct2_compute_type="",
-        wit_client_access_tokens=[wit_api_key],
+        wit_client_access_tokens=[api_key], 
         max_cutting_duration=5,
         min_words_per_segment=1,
         save_files_before_compact=False,
         save_yt_dlp_responses=False,
         output_sample=0,
         output_formats=[TranscriptType.TXT, TranscriptType.SRT],
-        output_dir=str(file_path.parent),
+        output_dir=str(output_dir),
     )
 
     print(f"Transcribing file: {file_path}")
     progress = deque(farrigh(config), maxlen=0)
     print(f"Transcription completed. Check the output directory for the generated files.")
 
-def main():
-    choice = input("Do you want to transcribe a YouTube video (Y) or a local file (L)? [Y/L]: ").strip().upper()
+@app.route('/transcribe', methods=['POST'])
+def transcribe():
+    data = request.get_json()
+    api_key = data.get('api_key')
+    language_sign = data.get('language_sign')
+    youtube_url = data.get('youtube_url')
+    file_path = data.get('file_path')
 
-    if choice == 'Y':
-        youtube_url = input("Enter the YouTube video link: ")
-        language_sign = input("Enter the language sign (e.g., EN, AR, FR, JA): ")
-        audio_file = download_youtube_audio(youtube_url)
-        transcribe_file(audio_file, language_sign)
-    elif choice == 'L':
-        file_path = input("Enter the path to the local file or directory: ")
-        file_path = Path(file_path)
+    if not api_key:
+        return jsonify({'error': 'API key is required'}), 401
+    
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")  # Prepare a timestamp for naming
 
-        if file_path.is_dir():
-            # Process all audio/video files in the directory
-            for file in file_path.glob('*'):
-                if file.suffix.lower() in ['.wav']:
-                    language_sign = input(f"Enter the language sign for {file.name} (e.g., EN, AR, FR, JA): ")
-                    transcribe_file(file, language_sign)
-                elif file.suffix.lower() in ['.mp3']:
-                    wav_file = convert_mp3_to_wav(file)
-                    language_sign = input(f"Enter the language sign for {file.name} (e.g., EN, AR, FR, JA): ")
-                    transcribe_file(wav_file, language_sign)
-                elif file.suffix.lower() in ['.mp4', '.mkv', '.avi']:
-                    audio_file = convert_video_to_audio(file)
-                    language_sign = input(f"Enter the language sign for {file.name} (e.g., EN, AR, FR, JA): ")
-                    transcribe_file(audio_file, language_sign)
+    if youtube_url:
+        audio_file, timestamp = download_youtube_audio(youtube_url)
+        if audio_file:
+            transcribe_file(audio_file, language_sign, api_key, timestamp)
         else:
-            if file_path.suffix.lower() in ['.mp3']:
-                file_path = convert_mp3_to_wav(file_path)
-            elif file_path.suffix.lower() in ['.mp4', '.mkv', '.avi']:
-                file_path = convert_video_to_audio(file_path)
-            language_sign = input("Enter the language sign (e.g., EN, AR, FR): ")
-            transcribe_file(file_path, language_sign)
+            return jsonify({'error': 'Failed to download or process the YouTube video'}), 500
+    elif file_path:
+        file_path = Path(file_path)
+        audio_file = None
+        if file_path.suffix.lower() in ['.mp3', '.mp4', '.mkv', '.avi']:
+            # Use the timestamp when converting to ensure unique folder creation
+            audio_file = convert_video_to_audio(file_path, timestamp)
+            transcribe_file(audio_file, language_sign, api_key, timestamp)
+        if not audio_file:
+            return jsonify({'error': 'Failed to process the local file'}), 500
     else:
-        print("Invalid choice. Exiting.")
-        sys.exit(1)
+        return jsonify({'error': 'No YouTube URL or file path provided'}), 400
 
-if __name__ == "__main__":
-    main()
+    # Create a zip file of the timestamp-named folder
+    downloads_path = Path(__file__).parent / 'downloads'
+    zip_filename = f"{downloads_path}/transcription_results_{timestamp}.zip"
+    zip_command = ['zip', '-r', zip_filename, downloads_path / timestamp]
+    subprocess.run(zip_command, check=True)
+
+    # Send the zip file as a response
+    response = send_file(zip_filename, as_attachment=True)
+
+    # Delete the downloads folder after sending the zip file
+    shutil.rmtree(downloads_path / timestamp)
+
+    return response
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)

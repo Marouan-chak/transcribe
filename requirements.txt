@@ -3,3 +3,5 @@ ffmpeg-python
 yt-dlp==2023.7.6
 pydub==0.25.1
 python-dotenv==1.0.1
+flask-cors
+flask
