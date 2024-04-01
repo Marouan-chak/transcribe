@@ -6,7 +6,8 @@ WORKDIR /usr/src/app
 
 # Install system dependencies for yt-dlp and ffmpeg
 RUN apt-get update && \
-    apt-get install -y ffmpeg && \
+    apt-get install -y ffmpeg zip ca-certificates && \  
+    update-ca-certificates && \  
     rm -rf /var/lib/apt/lists/*
 
 # Copy the requirements.txt first to leverage Docker cache

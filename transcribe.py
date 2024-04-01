@@ -100,8 +100,8 @@ def transcribe():
     zip_command = ['zip', '-r', zip_filename, downloads_path / timestamp]
     subprocess.run(zip_command, check=True)
 
-    # Send the zip file as a response
     response = send_file(zip_filename, as_attachment=True)
+    response.headers['Content-Disposition'] = 'attachment; filename=transcription_results.zip'
 
     # Delete the downloads folder after sending the zip file
     shutil.rmtree(downloads_path / timestamp)

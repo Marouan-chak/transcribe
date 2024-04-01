@@ -16,6 +16,7 @@ spec:
       containers:
       - name: transcribe
         image: marouandock/invoisight:transcribe
+        imagePullPolicy: Always
         ports:
         - containerPort: 5000
         resources:
