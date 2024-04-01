@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transcribe-app
+  namespace: tts
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: transcribe
+  template:
+    metadata:
+      labels:
+        app: transcribe
+    spec:
+      containers:
+      - name: transcribe
+        image: marouandock/invoisight:transcribe
+        ports:
+        - containerPort: 5000
+        resources:
+          requests:
+            cpu: "250m"  # Request 250 millicpu (1/4 of a CPU core)
+            memory: "256Mi"  # Request 256 MiB of memory
+          limits:
+            cpu: "500m"  # Maximum CPU allowed is 500 millicpu (1/2 of a CPU core)
+            memory: "512Mi"  # Maximum memory allowed is 512 MiB
+      imagePullSecrets:
+      - name: regcred

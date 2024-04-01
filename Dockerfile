@@ -18,8 +18,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Now copy the rest of your app's source code
 COPY . .
 
-# Define environment variable
-ENV NAME World
 
 # Run transcribe.py when the container launches
 CMD ["python", "./transcribe.py"]

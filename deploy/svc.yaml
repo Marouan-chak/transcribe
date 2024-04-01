@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: transcribe-service
+  namespace: tts
+spec:
+  type: ClusterIP
+  selector:
+    app: transcribe
+  ports:
+  - port: 5000
+    targetPort: 5000
